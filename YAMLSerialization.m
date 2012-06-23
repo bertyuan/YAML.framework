@@ -8,6 +8,7 @@
 //
 
 #import "YAMLSerialization.h"
+#import "yaml.h"
 
 NSString *const YAMLErrorDomain = @"com.github.mirek.yaml";
 
@@ -26,10 +27,8 @@ NSString *const YAMLErrorDomain = @"com.github.mirek.yaml";
 #pragma mark -
 
 static int YAMLSerializationDataHandler(void *data, unsigned char *buffer, size_t size) {
-	NSMutableString *string = (NSMutableString*)data;
-	NSString *buf = [[NSString alloc] initWithBytes:buffer length:size encoding:NSUTF8StringEncoding]; 
-	[string appendString:buf];
-	[buf release];
+	NSMutableData *dest = (NSMutableData*)data;
+    [dest appendBytes:buffer length:size];
 	return YES;
 }
 
@@ -66,7 +65,9 @@ static int YAMLSerializationProcessValue(yaml_document_t *document, id value) {
 		if ( ![value isKindOfClass:[NSString class]] ) {
 			value = [value stringValue];
 		}
-		nodeId = yaml_document_add_scalar(document, NULL, (yaml_char_t*)[value UTF8String], [value length], YAML_PLAIN_SCALAR_STYLE);
+        yaml_char_t* buf = (yaml_char_t*)[value cStringUsingEncoding:NSUTF8StringEncoding];
+        yaml_char_t len = [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+		nodeId = yaml_document_add_scalar(document, NULL, buf, len, YAML_PLAIN_SCALAR_STYLE);
 	}
 	return nodeId;
 }
@@ -171,7 +172,8 @@ static id YAMLSerializationWithDocument(yaml_document_t *document, YAMLReadOptio
   for (node = document->nodes.start, i = 0; node < document->nodes.top; node++, i++) {
     switch (node->type) {
       case YAML_SCALAR_NODE:
-        objects[i] = [[stringClass alloc] initWithUTF8String: (const char *)node->data.scalar.value];
+            //objects[i] = [[stringClass alloc] initWithCString:(const char*)node->data.scalar.value encoding:NSUTF16LittleEndianStringEncoding];
+            objects[i] = [[stringClass alloc] initWithUTF8String: (const char *)node->data.scalar.value];
         if (!root) root = objects[i];
         break;
         
@@ -183,6 +185,8 @@ static id YAMLSerializationWithDocument(yaml_document_t *document, YAMLReadOptio
       case YAML_MAPPING_NODE:
         objects[i] = [[NSMutableDictionary alloc] initWithCapacity: node->data.mapping.pairs.top - node->data.mapping.pairs.start];
         if (!root) root = objects[i];
+        break;
+      default:
         break;
     }
   }
@@ -200,6 +204,8 @@ static id YAMLSerializationWithDocument(yaml_document_t *document, YAMLReadOptio
           [objects[i] setObject: objects[pair->value - 1]
                          forKey: objects[pair->key - 1]];
         break;
+      default:
+          break;
     }
   }
 	
@@ -254,7 +260,7 @@ static id YAMLSerializationWithDocument(yaml_document_t *document, YAMLReadOptio
     
     if (!done) {
       documentObject = YAMLSerializationWithDocument(&document, opt, error);
-      if (error) {
+      if (error && *error) {
 		  yaml_document_delete(&document);
       } else {
         [documents addObject: documentObject];
@@ -296,6 +302,7 @@ static id YAMLSerializationWithDocument(yaml_document_t *document, YAMLReadOptio
 	}
 	
 	yaml_emitter_set_encoding(&emitter, YAML_UTF8_ENCODING);
+    yaml_emitter_set_unicode(&emitter, 1);
 	yaml_emitter_set_output(&emitter, YAMLSerializationWriteHandler, (void *)stream);
 	
 	// Open output stream
@@ -334,7 +341,7 @@ static id YAMLSerializationWithDocument(yaml_document_t *document, YAMLReadOptio
 
 + (NSData *) dataFromYAML:(id)yaml options:(YAMLWriteOptions) opt error:(NSError **) error
 {
-	NSMutableString *data = [NSMutableString string];
+	NSMutableData *data = [NSMutableData data];
 	
 	yaml_emitter_t emitter;
 	if (!yaml_emitter_initialize(&emitter)) {
@@ -343,6 +350,7 @@ static id YAMLSerializationWithDocument(yaml_document_t *document, YAMLReadOptio
 	}
 
 	yaml_emitter_set_encoding(&emitter, YAML_UTF8_ENCODING);
+    yaml_emitter_set_unicode(&emitter, 1);
 	yaml_emitter_set_output(&emitter, YAMLSerializationDataHandler, (void *)data);
 	
 	if (kYAMLWriteOptionMultipleDocuments & opt) {
@@ -372,7 +380,7 @@ static id YAMLSerializationWithDocument(yaml_document_t *document, YAMLReadOptio
 	}
 
 	yaml_emitter_delete(&emitter);
-	return [data dataUsingEncoding:NSUnicodeStringEncoding];
+    return data;
 }
 
 @end
